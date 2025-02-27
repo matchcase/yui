@@ -13,10 +13,13 @@
             [cheshire.core :refer :all]
             [cheshire.generate :refer [encode-str]]
             [clojure.java.shell :as shell]
+            [clojure.java.io :as io]
             [clojure.set]
             [clojure.xml :as xml])
+  (:import (java.util Base64))
   (:gen-class))
 
+(def car first) (def cdr next)
 (def state (atom nil))
 (def bot-id (atom nil))
 (def config (edn/read-string (slurp "config.edn")))
@@ -59,24 +62,27 @@
 (defmethod handle-event :message-create
   [_ {:keys [id channel-id author mentions content guild-id referenced-message member attachments] :as _data}]
   (go
-  (cond
-  (and (not (:bot author))
-             (some #{@bot-id} (map :id mentions)))
-    (search-ai author
-     {:guild_id guild-id
-                :channel_id channel-id
-                :message_id id}
-               content)
-  (and (not (:bot author)) ;; fix for the recursive mention bug 
-             (< 2 (count content)))
-    (if (some #(= (subs content 0 3) %) (:names config)) ;; checks if bot was mentioned
-      (let [mess0 (next (tokenize content))
-            mess (remove #{"please" "Please" "PLEASE"} mess0)
-            com (first mess)
-            mmap {:guild_id guild-id
+    (cond
+      (and (not (:bot author))
+           (some #{@bot-id} (map :id mentions)))
+      (search-ai (:username author)
+                 (:id author)
+                 {:guild_id guild-id
                   :channel_id channel-id
-                  :message_id id}]
-        (if (not (first mess)) (reply mmap "Wut.")
+                  :message_id id}
+                 content
+                 referenced-message
+                 (or (car attachments) (car (:attachments referenced-message))))
+      (and (not (:bot author)) ;; fix for the recursive mention bug 
+           (< 2 (count content)))
+      (if (some #(= (subs content 0 3) %) (:names config)) ;; checks if bot was mentioned
+        (let [mess0 (cdr (tokenize content))
+              mess (remove #{"please" "Please" "PLEASE"} mess0)
+              com (car mess)
+              mmap {:guild_id guild-id
+                    :channel_id channel-id
+                    :message_id id}]
+          (if (not (car mess)) (reply mmap "Wut.")
             (cond-action com config
                          :names
                          (reply mmap (rand-nth (:fun config)))
@@ -86,118 +92,129 @@
                          (say-bye channel-id author)
                          :todo
                          (if (mod? (:id author))
-                           (add-todo channel-id (s/join " " (next mess))) (not-a-mod channel-id))
+                           (add-todo channel-id (s/join " " (cdr mess))) (not-a-mod channel-id))
                          :say
-                         (say-x channel-id (s/join " " (next mess)))
+                         (say-x channel-id (s/join " " (cdr mess)))
                          :search
-                         (if (= (first (next mess)) "image")
-                           (yui-image-search channel-id (s/join "+" (next (next mess))))
-                           (if (or (= (first (next mess)) "yt")
-                                   (= (first (next mess)) "youtube"))
-                             (yui-yt-search channel-id (s/join "+" (next (next mess))))
-                             (yui-search channel-id (s/join "+" (next mess)))))
+                         (if (= (car (cdr mess)) "image")
+                           (yui-image-search channel-id (s/join "+" (cdr (cdr mess))))
+                           (if (or (= (car (cdr mess)) "yt")
+                                   (= (car (cdr mess)) "youtube"))
+                             (yui-yt-search channel-id (s/join "+" (cdr (cdr mess))))
+                             (yui-search channel-id (s/join "+" (cdr mess)))))
                          :man
-                         (man-page mmap (next mess))
+                         (man-page mmap (cdr mess))
                          :remind
-                         (let [cmd (if (= "me" (first (next mess)))
-                                     (first (next (next mess)))
-                                     (first (next mess)))
-                               text (if (= "me" (first (next mess)))
-                                     (next (next (next mess)))
-                                     (next (next mess)))]
+                         (let [cmd (if (= "me" (car (cdr mess)))
+                                     (car (cdr (cdr mess)))
+                                     (car (cdr mess)))
+                               text (if (= "me" (car (cdr mess)))
+                                      (cdr (cdr (cdr mess)))
+                                      (cdr (cdr mess)))]
                            (remind (case cmd
                                      "in" 'in ; duration
 
                                      ("on" "at") 'at ; exact time
 
                                      'in)
+                                   ;(reply mmap "Invalid reminder command!")
                                    (if (or (= cmd "in") (= cmd "on") (= cmd "at"))
-                                     (first text)
+                                     (car text)
                                      cmd)
                                    (if (or (= cmd "in") (= cmd "on") (= cmd "at"))
-                                     (detokenize (next text))
+                                     (detokenize (cdr text))
                                      (detokenize text))
                                    mmap))
+                         :menu
+                         (yui-show mmap "menu")
                          :show
-                         (let [cmd (first (next mess))]
+                         (let [cmd (car (cdr mess))]
                            (case cmd
-                             "add" (if (first attachments)
-                                     (add-image mmap (first (next (next mess))) (first attachments))
-                                     (if (first (:attachments referenced-message))
+                             "add" (if (car attachments)
+                                     (add-image mmap (car (cdr (cdr mess))) (car attachments))
+                                     (if (car (:attachments referenced-message))
                                        (add-image mmap 
-                                                  (s/join "-" (next mess))
-                                                  (first (:attachments referenced-message)))
+                                                  (s/join "-" (cdr mess))
+                                                  (car (:attachments referenced-message)))
                                        (reply mmap "No file specified!")))
-                             "update" (if (first attachments)
-                                        (update-image mmap (first (next (next mess))) (first attachments))
-                                        (if (first (:attachments referenced-message))
+                             "update" (if (car attachments)
+                                        (update-image mmap (car (cdr (cdr mess))) (car attachments))
+                                        (if (car (:attachments referenced-message))
                                           (update-image mmap 
-                                                        (s/join "-" (next mess))
-                                                        (first (:attachments referenced-message)))
+                                                        (s/join "-" (cdr mess))
+                                                        (car (:attachments referenced-message)))
                                           (reply mmap "No file specified!")))
                              "list" (image-listing mmap)
                              (yui-show mmap cmd)))
+
                          :disconnect
                          (if (mod? (:id author)) (do
                                                    (reply mmap (affirm))
                                                    (reply mmap "https://tenor.com/view/yui-x-azusa-yui-azusa-azunyan-anime-gif-21336402")
                                                    ;; doesn't wait for some reason
                                                    (goodbye channel-id))
-                             (not-a-mod channel-id))
+                           (not-a-mod channel-id))
+                         :flush
+                         (flush-memory)
+                         :rotate
+                         (if (not (cdr mess)) 
+                           (rotate-model)
+                           (let [rot-val (car (cdr mess))]
+                             (rotate-model (read-string rot-val))))
                          :pin
                          (pin-message channel-id (:id referenced-message))
                          :edit
                          (if (mod? (:id author)) (do
                                                    (reply mmap (affirm))
                                                    (edit-call channel-id (:id referenced-message)))
-                             (not-a-mod channel-id))
+                           (not-a-mod channel-id))
                          :delete
                          (if (mod? (:id author)) (do
                                                    (reply mmap (affirm))
                                                    (delete-message channel-id (:id referenced-message)))
-                             (not-a-mod channel-id))
+                           (not-a-mod channel-id))
                          :repl
                          (if (mod? (:id author)) (do
                                                    (reply mmap (affirm))
-                                                   (live-repl channel-id (next mess))))
+                                                   (live-repl channel-id (cdr mess))))
                          :sub
-                         (if (next mess)
-                           (subscribe mmap author (next mess))
+                         (if (cdr mess)
+                           (subscribe mmap author (cdr mess))
                            (reply mmap "Enter the sub group's name!"))
                          :ping
-                         (if (next mess)
-                           (sub-ping mmap (first (next mess)))
+                         (if (cdr mess)
+                           (sub-ping mmap (car (cdr mess)))
                            (reply mmap "Mention a sub group you dolt!"))
                          :leaderboard
                          (leaderboard channel-id guild-id)
                          :debt
-                         (if (:id (first mentions))
-                           (debt channel-id author (first mentions) (first (next mess)))
+                         (if (:id (car mentions))
+                           (debt channel-id author (car mentions) (car (cdr mess)))
                            (reply mmap "No one mentioned!"))
                          :settle
-                         (if (:id (first mentions))
-                           (settle channel-id author (first mentions) (first (next mess)))
+                         (if (:id (car mentions))
+                           (settle channel-id author (car mentions) (car (cdr mess)))
                            (reply mmap "No one mentioned!"))
                          :balance
-                         (if (:id (first mentions))
-                           (balance channel-id author (first mentions))
+                         (if (:id (car mentions))
+                           (balance channel-id author (car mentions))
                            (reply mmap "No one mentioned!"))
                          :kill
-                         (kill-person channel-id (first mentions))
+                         (kill-person channel-id (car mentions))
                          :caption
-                         (if (first attachments)
-                           (caption channel-id (first attachments) (s/join " " (next mess)))
-                           (if (first (:attachments referenced-message))
-                             (caption channel-id (first (:attachments referenced-message)) (s/join " " (next mess)))
+                         (if (car attachments)
+                           (caption channel-id (car attachments) (s/join " " (cdr mess)))
+                           (if (car (:attachments referenced-message))
+                             (caption channel-id (car (:attachments referenced-message)) (s/join " " (cdr mess)))
                              (reply mmap "No attachments given!")))
                          :help
                          (say-help channel-id)
                          :privacy
                          (dm-privacy channel-id author)
                          :roll
-                         (if (not (next mess)) 
+                         (if (not (cdr mess)) 
                            (roll channel-id)
-                           (let [roll-val (first (next mess))
+                           (let [roll-val (car (cdr mess))
                                  alpha (re-find #"[a-zA-Z]" roll-val)]
                              (if (not alpha)
                                (roll channel-id (read-string roll-val))
@@ -223,20 +240,20 @@
                          :meme
                          (reply mmap (rand-nth (:memes config)))
                          :gif
-                         (let [cmd (first (next mess))]
+                         (let [cmd (car (cdr mess))]
                            (if (not (= cmd "add"))
                              (random-gif mmap)
-                             (if (first attachments)
-                               (add-gif mmap (first attachments))
-                               (if (first (:attachments referenced-message))
-                                 (add-gif mmap (first (:attachments referenced-message)))
+                             (if (car attachments)
+                               (add-gif mmap (car attachments))
+                               (if (car (:attachments referenced-message))
+                                 (add-gif mmap (car (:attachments referenced-message)))
                                  (reply mmap "Specify a file to add, baka!")))))
                          :smug
                          (reply mmap "https://tenor.com/view/lenny-face-kon-yui-yui-hirasawa-anime-gif-21814399")
                          :shrug
                          (reply mmap "https://i.redd.it/8ahxkbdcwn251.png")
                          :will
-                         (if (= (first (next mess))
+                         (if (= (car (cdr mess))
                                 "you")
                            (reply mmap "No, I won't.")
                            (reply mmap (rand-nth (:possible? config))))
@@ -261,16 +278,25 @@
                          :owo
                          (reply mmap "UwU")
                          :else
-                         (search-ai author mmap content))))
-      (or
-       (when (not-empty (clojure.set/intersection (set (tokenize content)) (set (:names config))))
-        (search-ai author
-                   {:guild_id guild-id
+                         (search-ai (:username author) (:id author) mmap content 
+                                    referenced-message (or (car attachments) (car (:attachments referenced-message)))
+                                    ))))
+        (or
+          (when (not-empty (clojure.set/intersection (set (tokenize content)) (set (:names config))))
+            (search-ai (:username author) (:id author)
+                       {:guild_id guild-id
+                        :channel_id channel-id
+                        :message_id id}
+                       content
+                       referenced-message
+                       (or (car attachments) (car (:attachments referenced-message)))))
+          (when (re-find #"^=menu$" content)
+            (reply {:guild_id guild-id
                     :channel_id channel-id
-                    :message_id id}
-                   content))
-      (when (re-find #"(?i)pog" content)
-        (counter-add channel-id author)))))))
+                    :message_id id} 
+                   "I have a better menu >:("))
+          (when (re-find #"(?i)pog" content)
+            (counter-add channel-id author)))))))
 
 (defmethod handle-event :ready
   [_ _]
@@ -299,8 +325,8 @@
 
 (defn update-alive-message []
   (m/edit-message! (:rest @state)
-                   ; alive channel ID
-                   ; alive channel message
+                   947518374294999101
+                   947536502215311370
                    :content
                    (str "Alive at "
                         (reset! cnt (mod (inc @cnt) 6))

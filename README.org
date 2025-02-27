@@ -20,6 +20,7 @@ All of this and more, handled fully asynchronously!
 See [[file:docs/SETUP.org][SETUP.org]] to get started.
 Any string that contains yui, such as "Yui-chan," "yui", "YUI" will invoke her.
 The format for running commands is ~<string containing yui> <name of the command> <command arguments>~
+If you use the word "yui" anywhere else in the sentence, you'll get an LLM-generated response, using OpenRouter.
 The command name list can be accessed via yui help.
 
 * Notes
@@ -28,7 +29,7 @@ The command name list can be accessed via yui help.
 
 * License
 
-Copyright © 2021-2023 Sarthak Shah
+Copyright © 2021-2025 Sarthak Shah
 
 This program and the accompanying materials are made available under the
 terms of the Eclipse Public License 2.0 which is available at

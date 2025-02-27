@@ -1,21 +1,23 @@
-{:token ; discord token
- :admin-id "" ; id of the admin
+{:token ;; discord API token
+ :openrouter ;; openrouter API token
+ :flush ["flush" "clear"]
+ :rotate ["rotate" "swap"]
  :playing "polishing her guitar!"
  :play ["play"]
- :replit? false ; legacy, to be removed
- :member-role ; role id for membership
- :version "29th December Git Edition"
- :responses ["Stop bothering me >:("]
+ :replit? false
+ :member-role ;; member id number
+ :version "27th February Github Edition"
+ :responses [] ;; enter witty response strings
  :affirm ["Yessir" "Okay" "On it!" "Roger!"]
  :shrug ["shrug"]
- :say ["say" "tell"]
+ :say ["say"]
  :fuwa ["fuwa"]
- :possible? ["Yes" "No" "Maybe" "Check the textbook for  detailed explanation"]
+ :possible? ["Yes" "No" "Maybe" "Check textbook for detailed explanation"]
  :remind ["reminder" "remind"]
  :search ["search" "google"]
  :man ["man" "manual"]
  :todo ["todo"]
- :todo-channel ; enter the id of the channel where you'd like to get TODO messages
+ :todo-channel ;; todo channel ID
  :debt ["debt" "owe" "iou"]
  :settle ["settle" "paid"]
  :balance ["balance" "bal"]
@@ -32,8 +34,6 @@
        "https://tenor.com/view/yui-hirasawa-kon-yui-meme-yui-gif-anime-gif-15109600"
        "https://tenor.com/view/anime-found-you-kon-yui-gif-21221531"]
  :disconnect ["disconnect" "disconnect!" "sleep" "sleep!"]
- :revoke ["revoke" "dishonor"]
- :grant ["grant" "honor"]
  :meme ["meme" "joke" "funny" "fun" "kek"]
  :memes ["https://i.kym-cdn.com/photos/images/newsfeed/001/323/114/d3c.jpg"
          "https://i.kym-cdn.com/photos/images/newsfeed/002/315/996/303.jpg"
@@ -58,9 +58,8 @@
          "https://preview.redd.it/g8l7s0m03h861.gif"
          "https://loginportal.funnyjunk.com/pictures/Nearly+died+of+a+startle_6b2a13_8072825.jpg"]
  :add ["add" "give"]
- :remove ["remove"]
- :verify ["verify"]
  :register ["register"]
+ :score ["score"]
  :leaderboard ["leaderboard"]
  :roll ["roll" "dice" "die"]
  :cry ["cry"]
@@ -73,6 +72,7 @@
  :predict ["predict" "Predict" "PREDICT" "chance" "Chance" "CHANCE"]
  :edit ["edit" "change"]
  :delete ["delete" "purge"]
+ :nuke ["yooey"]
  :help ["help" "Help" "HELP"]
  :repl ["repl" "Repl" "REPL" "run" "Run" "RUN" "eval" "Eval" "EVAL"]
  :kill ["kill" "Kill" "KILL"]
@@ -94,16 +94,17 @@
  :unsub ["unsubscribe" "unsub"]
  :ping ["ping" "mention"]
  :show ["show" "pic" "gallery"]
- :privacy-string "We don't store any data"
+ :menu ["menu", "mess"]
+ :privacy-string "We store a LOT of data ;)"
  :help-string
  "```lisp
 ┌─────────────────────┐
 │                     │
-│m     m          \"   │
-│ \"m m\"  m   m  mmm   │
-│  \"#\"   #   #    #   │
+│m     m          ^   │
+│ ^m m^  m   m  mmm   │
+│  ^#^   #   #    #   │
 │   #    #   #    #   │
-│   #    \"mm\"#  mm#mm │
+│   #    ^mm^#  mm#mm │
 │                     │
 │                     │
 └─────────────────────┘
@@ -152,5 +153,5 @@ Commands:
  owo
  uwu
 
- Written in Clojure by Average
+ Written in Clojure by matchcase
 ```"}

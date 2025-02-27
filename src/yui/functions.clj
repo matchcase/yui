@@ -7,36 +7,196 @@
 (defn unspace [str]
   (s/replace str #" " "%20"))
 
+(defn escape-underscores [str]
+  (s/replace str #"_" "\\_"))
+
 ;; is mod?
 (defn mod? [user-id]
-  (= user-id (:admin-id config)))
+  (= user-id "885027267401646121"))
 
 (defmacro when-mod [user-id & body]
   (list 'if (mod? user-id)
         (cons 'do body)))
 
-(defn search-ai [user-name mmap query]
-  (reply mmap
-         (str
-           (:content
-             (:message
-               (first
-                 (:choices
-                   (parse-string
-                     (:body
-                       (client/post "http://127.0.0.1:5000/v1/chat/completions"
-                                    {:form-params
-                                     {
-                                      :mode "chat"
-                                      :character "Yui"
-                                      :instruction_template "ChatML"
-                                      :messages [{:role "user"
-                                                  :content query}]
-                                      }
-                                     :content-type :json
-                                     :accept :json})) true))))))))
+(def model-idx (atom [(jt/plus (jt/local-date-time)
+                         (jt/days 1))
+                0]))
+
+(def image-model-list ["meta-llama/llama-3.2-90b-vision-instruct:free"
+                       "meta-llama/llama-3.2-11b-vision-instruct:free"])
+
+(def model-list [
+                 ;; Enter strings with names of OpenRouter models you'd like to use
+                 ])
 
 
+(def ai-prompt
+  ;; Enter the prompt for the bot
+  )
+
+(def messages-ctx (atom [{:role "system" :content ai-prompt}]))
+
+(defn flush-memory []
+  (reset! messages-ctx
+          [{:role "system" :content ai-prompt}]))
+
+(defn rotate-model
+  ([]
+   (swap! model-idx (fn [mdidx]
+                      [(jt/plus (jt/local-date-time)
+                                (jt/days 1))
+                       (mod (inc (first (rest mdidx))) 5)])))
+  ([num]
+   (reset! model-idx [(jt/plus (jt/local-date-time)
+                               (jt/days 1))
+                      (mod num 5)])))
+
+(def search-ai-username-list
+  (atom (:usernames (edn/read-string (slurp "~/.yui/ai-usernames.edn")))))
+
+(def search-ai-username-assoc
+  (atom (:usernames-assoc (edn/read-string (slurp "~/.yui/ai-usernames.edn")))))
+
+(defn search-ai-add-username [username id]
+  (let [username-file (edn/read-string (slurp "~/.yui/ai-usernames.edn"))]
+    (spit "~/.yui/ai-usernames.edn"
+          (binding [*print-length* -1] (prn-str (assoc-in username-file 
+                                                          [(keyword "usernames")] 
+                                                          (concat ((keyword "usernames")
+                                                                   username-file)
+                                                                  [username])))))
+    (spit "~/.yui/ai-usernames.edn"
+          (binding [*print-length* -1] (prn-str (assoc-in username-file 
+                                                          [(keyword "usernames-assoc")] 
+                                                          (merge ((keyword "usernames-assoc")
+                                                                   username-file)
+                                                                  {(keyword username) id})))))
+    (swap! search-ai-username-list (fn [v] (vec (concat v [username]))))
+    (swap! search-ai-username-assoc (fn [m] (merge m {(keyword username) id})))))
+
+(defn search-ai-check-username [username] (belongs username @search-ai-username-list))
+
+(defn image-url-to-base64 [url]
+  (let [response (client/get url {:as :byte-array})
+        image-bytes (:body response)]
+    (.encodeToString (Base64/getEncoder) image-bytes)))
+
+(defn search-ai [user-name user-id mmap query response img]
+  (m/trigger-typing-indicator! (:rest @state)
+                               (:channel_id mmap))
+  (if (not (search-ai-check-username user-name))
+    (search-ai-add-username user-name user-id))
+
+  (println img)
+  (println (:content-type img))
+  (println (str (:content-type img)))
+  (println (and img (re-matches #"image\/.+" (str (:content-type img)))))
+  (if (and img (re-matches #"image\/.+" (str (:content-type img))))
+    (let [url "https://openrouter.ai/api/v1/chat/completions"
+          headers {"Content-Type" "application/json"
+                   "Authorization" (str "Bearer " (:openrouter config))}
+          messages (swap! messages-ctx (fn [v] (vec (concat v
+                                                           [{:role user-name
+                                                             :content [{:type "text" :text (or (str query) "What do you think about this image?")}
+                                                                       {:type "image_url" :image_url (str "data:image/jpeg;base64," (image-url-to-base64 (str (:url img))))}]}]))))
+          body (generate-string
+                {:model (nth image-model-list (first (rest @model-idx)))
+                 :messages messages})
+          print-this-stuff
+          (println {:headers headers
+                    :body body
+                    :content-type :json})
+          reply-json
+          (parse-string
+           (:body
+            (client/post url
+                         {:headers headers
+                          :body body
+                          :throw-exceptions false
+                          :content-type :json}))
+           true)
+          reply-message-unprocessed
+          (:message
+           (nth
+            (:choices reply-json) 0))
+          print-this-stuff-again
+          (println reply-message-unprocessed)
+          reply-message
+          (if reply-message-unprocessed
+            {:role (:role reply-message-unprocessed)
+             :content
+             (reduce (fn [res ss] (s/replace res ss (mention-user ((keyword ss) @search-ai-username-assoc))))
+                     (:content reply-message-unprocessed)
+                     @search-ai-username-list)}
+            reply-message-unprocessed)]
+      (println reply-json)
+      (println reply-message-unprocessed)
+      (println reply-message)
+      (if (not (not reply-message))
+        (do
+          (swap! messages-ctx (fn [v] (vec (concat v
+                                                  [reply-message]))))
+          (reply mmap (:content reply-message)))
+        (do
+          (swap! messages-ctx (fn [v] (vec (butlast v))))
+          (swap! model-idx (fn [mdidx]
+                             [(jt/plus (jt/local-date-time)
+                                       (jt/days 1))
+                              (mod (inc (first (rest mdidx))) 5)]))
+          (search-ai user-name user-id mmap query response img))))
+    
+    (let [url "https://openrouter.ai/api/v1/chat/completions"
+          headers {"Content-Type" "application/json"
+                   "Authorization" (str "Bearer " (:openrouter config))}
+          messages (swap! messages-ctx (fn [v] (vec (concat v
+                                                           [{:role user-name
+                                                             :content (str query)}]))))
+          body (generate-string
+                {:model (nth model-list (first (rest @model-idx)))
+                 :messages messages})
+          print-this-stuff
+          (println {:headers headers
+                    :body body
+                    :content-type :json})
+          reply-json
+          (parse-string
+           (:body
+            (client/post url
+                         {:headers headers
+                          :body body
+                          :throw-exceptions false
+                          :content-type :json}))
+           true)
+          reply-message-unprocessed
+          (:message
+           (nth
+            (:choices reply-json) 0))
+          print-this-stuff-again
+          (println reply-message-unprocessed)
+          reply-message
+          (if reply-message-unprocessed
+            {:role (:role reply-message-unprocessed)
+             :content
+             (reduce (fn [res ss] (s/replace res ss (mention-user ((keyword ss) @search-ai-username-assoc))))
+                     (:content reply-message-unprocessed)
+                     @search-ai-username-list)}
+            reply-message-unprocessed)]
+      (println reply-json)
+      (println reply-message-unprocessed)
+      (println reply-message)
+      (if (not (not reply-message))
+        (do
+          (swap! messages-ctx (fn [v] (vec (concat v
+                                                  [reply-message]))))
+          (reply mmap (:content reply-message)))
+        (do
+          (swap! messages-ctx (fn [v] (vec (butlast v))))
+          (swap! model-idx (fn [mdidx]
+                             [(jt/plus (jt/local-date-time)
+                                       (jt/days 1))
+                              (mod (inc (first (rest mdidx))) 5)]))
+          (search-ai user-name user-id mmap query response img))))))
+      
 (def search-engine "https://search.zeroish.xyz/api.php?q=")
 (def fallback-search-engine "https://searx.tuxcloud.net/search?q=")
 
@@ -52,38 +212,32 @@
   (:body (client/get (str "https://inv.tux.pizza/api/v1/search?q=" query "&pretty=1&fields=videoId,title") {:as :json})))
 
 (defn yui-image-search [ch-id query]
-  (if (not (nil? (re-find #"(?i)child" query)))
-    (prompt ch-id "This search query has been reported to the authorities. Please refrain from searching for illegal topics.")
-    (let [result (search-image query)]
-      (if (:thumbnail (first result))
-        (prompt ch-id (str (:thumbnail (first result))))
-        (prompt ch-id "No results found!")))))
+  (let [result (search-image query)]
+    (if (:thumbnail (car result))
+      (prompt ch-id (str (:thumbnail (car result))))
+      (prompt ch-id "No results found!"))))
 
 (defn yui-yt-search [ch-id query]
-  (if (not (nil? (re-find #"(?i)child" query)))
-    (prompt ch-id "This search query has been reported to the authorities. Please refrain from searching for illegal topics.")
-    (let [result (search-yt query)]
-      (if (:title (first result))
-        (and
-         (prompt ch-id (str "**Here's the video you requested:**\n" (:title (first result))))
-         (prompt ch-id (str "https://youtu.be/" (:videoId (first result)))))
-        (prompt ch-id "No results found!")))))
+  (let [result (search-yt query)]
+    (if (:title (car result))
+      (and
+        (prompt ch-id (str "**Here's the video you requested:**\n" (:title (car result))))
+        (prompt ch-id (str "https://youtu.be/" (:videoId (car result)))))
+      (prompt ch-id "No results found!"))))
 
 (defn yui-search [ch-id query]
-  (if (not (nil? (re-find #"(?i)child" query)))
-    (prompt ch-id "This search query has been reported to the authorities. Please refrain from searching for illegal topics.")
-    (let [result (search query)]
-      (if (first result)
-        (if (:title (first result))
-          (prompt ch-id (str "**" (:title (first result)) "**\n"
-                             (:description (first result)) "\n"
-                             "\nFrom: " (unspace (:url (first result)))))
-          (prompt ch-id (str (:response (:special_response (first result))) "\n"
-                             "\nFrom: " (unspace (:source (:special_response (first result)))))))
-        (prompt ch-id "No results found!")))))
+  (let [result (search query)]
+    (if (car result)
+      (if (:title (car result))
+        (prompt ch-id (str "**" (:title (car result)) "**\n"
+                           (:description (car result)) "\n"
+                           "\nFrom: " (unspace (:url (car result)))))
+        (prompt ch-id (str (:response (:special_response (car result))) "\n"
+                           "\nFrom: " (unspace (:source (:special_response (car result)))))))
+      (prompt ch-id "No results found!"))))
 
 (defn man-page [mmap cmd]
-  (let [qqq (:out (shell/sh "curl" "-s" (str "https://cht.sh/" (first cmd) "?qT&style=bw")))]
+  (let [qqq (:out (shell/sh "curl" "-s" (str "https://cht.sh/" (car cmd) "?qT&style=bw")))]
     (reply mmap (subs qqq (s/index-of qqq "\n") (min (count qqq) 2000)))))
 
 ;; reminders
@@ -104,11 +258,11 @@
     (let [secs (max 0
                     (jt/as (jt/duration
                              (jt/local-date-time)
-                             (jt/local-date-time "dd/MM/yyyy-HH:mm:ss" (first reminder))) :seconds))]
+                             (jt/local-date-time "dd/MM/yyyy-HH:mm:ss" (car reminder))) :seconds))]
       (println (format "Seconds left: %s" secs))
       (<! (timeout (* secs 1000)))
-      (reply (first (next reminder))
-             (first (next (next reminder)))))))
+      (reply (car (cdr reminder))
+             (car (cdr (cdr reminder)))))))
 
 (defn ten-minute-check []
   (let [next-10-min (jt/plus (jt/local-date-time)
@@ -116,13 +270,18 @@
     (println "Doing a ten-minute-check.")
     (loop [remind []
            timings (edn/read-string (slurp time-file))]
-      (if (first remind) (call-reminder (first remind)))
-      (if (and (first timings)
+      (if (car remind) (call-reminder (car remind)))
+      (if (jt/before? (first @model-idx) ; (jt/local-date-time "dd/MM/yyyy-HH:mm:ss" (first @ctx))
+                      (jt/local-date-time))
+        (and (reset! model-idx [(jt/plus (jt/local-date-time) (jt/days 1))
+                                0])
+             (println "Reset model-idx!")))
+      (if (and (car timings)
                (jt/before? (jt/local-date-time
-                            "dd/MM/yyyy-HH:mm:ss" (first (first timings))) ; [(<time> messg reply-to ...) ...]
+                            "dd/MM/yyyy-HH:mm:ss" (car (car timings))) ; [(<time> messg reply-to ...) ...]
                            (jt/local-date-time next-10-min)))
-        (recur (conj remind (first timings))
-               (next timings))
+        (recur (conj remind (car timings))
+               (cdr timings))
         (binding [*print-length* -1]
           (prn-str (spit time-file
                          (or timings []))))))))
@@ -131,25 +290,25 @@
   ;; regex match
   (loop [time (jt/local-date-time)
          ent (s/split time-str #",")]
-    (println (format "Parsing Duration %s" (first ent)))
-    (if (and (first ent)
-             (re-matches #"(\w+)([hdms])" (first ent)))
-      (let [DUR ((fn [x] (cons (Integer/parseInt (first (next x)))
+    (println (format "Parsing Duration %s" (car ent)))
+    (if (and (car ent)
+             (re-matches #"(\w+)([hdms])" (car ent)))
+      (let [DUR ((fn [x] (cons (Integer/parseInt (car (cdr x)))
                               (rest (rest x))))
-                 (re-matches #"(\w+)([hdms])" (first ent)))]
-        (case (first (next DUR))
+                 (re-matches #"(\w+)([hdms])" (car ent)))]
+        (case (car (cdr DUR))
           "d"
-          (recur (jt/plus time (jt/days (first DUR)))
-                 (next ent))
+          (recur (jt/plus time (jt/days (car DUR)))
+                 (cdr ent))
           "h"
-          (recur (jt/plus time (jt/hours (first DUR)))
-                 (next ent))
+          (recur (jt/plus time (jt/hours (car DUR)))
+                 (cdr ent))
           "m"
-          (recur (jt/plus time (jt/minutes (first DUR)))
-                 (next ent))
+          (recur (jt/plus time (jt/minutes (car DUR)))
+                 (cdr ent))
           "s"
-          (recur (jt/plus time (jt/seconds (first DUR)))
-                 (next ent))
+          (recur (jt/plus time (jt/seconds (car DUR)))
+                 (cdr ent))
           "ERROR"))
       time)))
 
@@ -164,7 +323,7 @@
           hour (nth time-arr 4)
           minutes (nth time-arr 5)
           seconds (nth time-arr 6)]
-      (jt/local-date-time (if year (Integer/parseInt year) 2023)
+      (jt/local-date-time (if year (Integer/parseInt year) 2024)
                           (Integer/parseInt month)
                           (Integer/parseInt day)
                           (Integer/parseIntger/parseInt hour)
@@ -176,7 +335,7 @@
             day (nth time-arr 1)
             month (nth time-arr 2)
             year (nth time-arr 3)]
-        (jt/local-date-time (if year (Integer/parseInt year) 2023)
+        (jt/local-date-time (if year (Integer/parseInt year) 2024)
                             (Integer/parseInt month)
                             (Integer/parseInt day)))
       ;; time regex
@@ -208,8 +367,8 @@
             (prn-str (spit time-file
                            (sort
                              #(jt/duration
-                                (jt/local-date-time "dd/MM/yyyy-HH:mm:ss" (first %))
-                                (jt/local-date-time "dd/MM/yyyy-HH:mm:ss" (first %)))
+                                (jt/local-date-time "dd/MM/yyyy-HH:mm:ss" (car %))
+                                (jt/local-date-time "dd/MM/yyyy-HH:mm:ss" (car %)))
                              (conj timings
                                    [(jtf/format yui-time-format time) ; exact time
                                     mmap ; replying to
@@ -281,14 +440,6 @@
 (defn say-error [ch-id com]
   (prompt ch-id (str "I don't know how to " com ", baka!")))
 
-(defn revoke-membership [ch-id guild mention]
-  (m/remove-guild-member-role! (:rest @state) guild mention (:member-role config))
-  (prompt ch-id "Sad to see an impostor amogus..."))
-
-(defn grant-membership [ch-id guild mention]
-  (m/add-guild-member-role! (:rest @state) guild (:id mention) (:member-role config))
-  (prompt ch-id (str "Welcome to the server, " (mention-user mention) \!)))
-
 (defn associated-key [user]
   (let [keyword-file (edn/read-string (slurp "keys.edn"))]
     ((keyword (str (:id user))) keyword-file)))
@@ -310,10 +461,10 @@
   (let [sub-file (edn/read-string (slurp "~/.yui/subs.edn"))]
     ;; yui sub create name
     ;; -> creates sub group
-    (if (= (first msg) "create")
-      (if (not (first (next msg)))
+    (if (= (car msg) "create")
+      (if (not (car (cdr msg)))
         (reply mmap "Enter a name for the new group!")
-      (let [group-name (apply str (re-seq #"\w" (first (next msg))))]
+      (let [group-name (apply str (re-seq #"\w" (car (cdr msg))))]
         (if ((keyword group-name) sub-file)
           (reply mmap "A sub group with the same name already exists!")
           (do
@@ -324,7 +475,7 @@
             (reply mmap "Sub group created!")))))
       ;; yui sub name
       ;; -> joins sub group
-      (let [group-name (apply str (re-seq #"\w" (first msg)))]
+      (let [group-name (apply str (re-seq #"\w" (car msg)))]
         (spit "~/.yui/subs.edn"
               (binding [*print-length* -1] (prn-str (assoc-in sub-file 
                                                               [(keyword group-name)] 
@@ -332,7 +483,7 @@
                                                                       [(:id author)])))))
         (reply mmap (str "Joined the sub group " group-name))))))
 
-(defn unsubscribe [ch-id msg]) ;; TODO
+(defn unsubscribe [ch-id msg])
 
 (defn sub-ping [mmap msg]
   (let [sub-file (edn/read-string (slurp "~/.yui/subs.edn"))]
@@ -351,7 +502,7 @@
 (defn image-listing [mmap]
   (let [image-file (edn/read-string (slurp "~/.yui/images.edn"))]
     (reply mmap (s/join ", " (map (fn [str] (s/replace str #"-" " "))
-                                    (next (s/split (apply str (keys image-file)) #":")))))))
+                                    (cdr (s/split (apply str (keys image-file)) #":")))))))
 
 (defn counter-add [ch-id f-author]
   (let [author (:id f-author)
@@ -385,65 +536,6 @@
                                       (<= (key2 score)
                                           (key1 score))))
                                    score)))))))
-  
-;; loop over it with get-guild-member! 
-
-(defn balance [ch-id f-author f-mention]
-  (let* [author (:id f-author)
-         mention (:id f-mention)
-         cash-file (edn/read-string (slurp "~/.yui/cash.edn"))
-         amt (- (or ((keyword mention) ((keyword author) cash-file)) 0)
-                (or ((keyword author) ((keyword mention) cash-file)) 0))]
-    (cond
-      (> amt 0) (prompt ch-id (str "Current balance is: you owe " amt " YuiCoin:tm: to " (:username f-mention)))
-      (< amt 0) (prompt ch-id (str "Current balance is: " (:username f-mention) " owes you " amt " YuiCoin:tm:"))
-      (= amt 0) (prompt ch-id (str "Current balance is 0! No debts!")))))
-
-
-(defn settle [ch-id f-author f-mention amount]
-  (let [author (:id f-author)
-        mention (:id f-mention)
-        cash-file (edn/read-string (slurp "~/.yui/cash.edn"))]
-    (if (not (every? #(Character/isDigit %) amount))
-      (prompt ch-id "Format: yui settle <int> @mention")
-      (let [amt (* -1 (Integer/parseInt amount))]
-        (prompt ch-id (str "Amount paid is: " (* -1 amt) " by " (:username f-mention) " to " (:username f-author)))
-        (if (or (not ((keyword mention) cash-file))
-                (not ((keyword author) ((keyword mention) cash-file))))
-          (spit "~/.yui/cash.edn"
-                (binding [*print-length* -1] (prn-str (assoc-in cash-file 
-                                                                [(keyword mention) (keyword author)] 
-                                                                amt))))
-          (spit "~/.yui/cash.edn"
-                (binding [*print-length* -1] (prn-str (assoc-in cash-file 
-                                                                [(keyword mention) (keyword author)] 
-                                                                (+ ((keyword author) 
-                                                                    ((keyword mention) cash-file))
-                                                                   amt))))))
-        (balance ch-id f-author f-mention)))))
-
-(defn debt [ch-id f-author f-mention amount]
-  (let [author (:id f-author)
-        mention (:id f-mention)
-        cash-file (edn/read-string (slurp "~/.yui/cash.edn"))]
-    (if (not (every? #(Character/isDigit %) amount))
-      (prompt ch-id "Format: yui iou <positive int> @mention")
-      (let [amt (Integer/parseInt amount)]
-        (prompt ch-id (str "Amount owed is: " amt " by " (:username f-author) " to " (:username f-mention)))
-        (if (not ((keyword mention) ((keyword author) cash-file)))
-          (spit "~/.yui/cash.edn"
-                (binding [*print-length* -1] (prn-str (assoc-in cash-file 
-                                                                [(keyword author) (keyword mention)] 
-                                                                amt))))
-          (spit "~/.yui/cash.edn"
-                (binding [*print-length* -1] (prn-str (assoc-in cash-file 
-                                                                [(keyword author) (keyword mention)] 
-                                                                (+ amt
-                                                                   ((keyword mention) 
-                                                                    ((keyword author) cash-file))))))))
-        (prompt ch-id "Debt entry made! Enjoy wageslaving~")
-        (balance ch-id f-author f-mention)))))
-
 
 (defn add-image [mmap key-name file]
   (let [image-file (edn/read-string (slurp "~/.yui/images.edn"))]
@@ -452,7 +544,7 @@
              image (clojure.java.io/copy
                      (:body (client/get (str (:url file)) {:as :stream}))
                      (java.io.File. (str "~/.yui/file_" stamp)))
-             fmt (s/lower-case (s/trim-newline (first (s/split (:out (apply shell/sh (tokenize (str "file -b --extension ~/.yui/file_" stamp)))) #"/"))))
+             fmt (s/lower-case (s/trim-newline (car (s/split (:out (apply shell/sh (tokenize (str "file -b --extension ~/.yui/file_" stamp)))) #"/"))))
              final-image (:out (apply shell/sh 
                                       (tokenize 
                                         (str "mv ~/.yui/file_" stamp 
@@ -471,7 +563,7 @@
              image (clojure.java.io/copy
                      (:body (client/get (str (:url file)) {:as :stream}))
                      (java.io.File. (str "~/.yui/file_" stamp)))
-             fmt (s/lower-case (s/trim-newline (first (s/split (:out (apply shell/sh (tokenize (str "file -b --extension ~/.yui/file_" stamp)))) #"/"))))
+             fmt (s/lower-case (s/trim-newline (car (s/split (:out (apply shell/sh (tokenize (str "file -b --extension ~/.yui/file_" stamp)))) #"/"))))
              final-image (:out (apply shell/sh 
                                       (tokenize 
                                         (str "mv ~/.yui/file_" stamp 
