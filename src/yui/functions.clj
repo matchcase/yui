@@ -34,11 +34,9 @@
   ;; Enter the prompt for the bot
   )
 
-(def messages-ctx (atom [{:role "system" :content ai-prompt}]))
+(def summary (atom (or (slurp "~/.yui/summary.txt") "")))
 
-(defn flush-memory []
-  (reset! messages-ctx
-          [{:role "system" :content ai-prompt}]))
+(def messages-ctx (atom [{:role "system" :content (str ai-prompt "\n" @summary)}]))
 
 (defn rotate-model
   ([]
@@ -197,6 +195,65 @@
                               (mod (inc (first (rest mdidx))) 5)]))
           (search-ai user-name user-id mmap query response img))))))
       
+(defn summarize-conversation []
+  (let [url "https://openrouter.ai/api/v1/chat/completions"
+        headers {"Content-Type" "application/json"
+                 "Authorization" (str "Bearer " (:openrouter config))}
+        messages [{:role "system"
+                  :content (str "Summarize the following conversation into a single concise paragraph that captures the key points. This summary will be used in a system prompt."
+                                (if (empty? @summary)
+                                  "\n"
+                                  (str " Also include details from the previous summary. Here is the previous summary:\n" @summary "\n"))
+                                "Here is the conversation:\n"
+                                (s/join "\n" (map #(str (:role %) ": " (:content %)) (vec (rest @messages-ctx)))))}]
+        body (generate-string
+              {:model (nth model-list (first (rest @model-idx)))
+               :messages messages})
+        print-this-stuff
+        (println {:headers headers
+                  :body body
+                  :content-type :json})
+        reply-json
+        (parse-string
+         (:body
+          (client/post url
+                       {:headers headers
+                        :body body
+                        :throw-exceptions false
+                        :content-type :json}))
+         true)
+        reply-message-unprocessed
+        (:message
+         (nth
+          (:choices reply-json) 0))
+        print-this-stuff-again
+        (println reply-message-unprocessed)
+        reply-message
+        (if reply-message-unprocessed
+          {:role (:role reply-message-unprocessed)
+           :content
+           (reduce (fn [res ss] (s/replace res ss (mention-user ((keyword ss) @search-ai-username-assoc))))
+                   (:content reply-message-unprocessed)
+                   @search-ai-username-list)}
+          reply-message-unprocessed)]
+    (println reply-json)
+    (println reply-message-unprocessed)
+    (println reply-message)
+    (if (not (not reply-message))
+      (:content reply-message)
+      (do
+        (swap! model-idx (fn [mdidx]
+                           [(jt/plus (jt/local-date-time)
+                                     (jt/days 1))
+                            (mod (inc (first (rest mdidx))) 5)]))
+        (summarize-conversation)))))
+
+(defn flush-memory []
+  (reset! summary (summarize-conversation))
+  (spit "~/.yui/summary.txt" @summary)
+  (reset! messages-ctx
+          [{:role "system" :content (str ai-prompt "\n" @summary)}]))
+
 (def search-engine "https://search.zeroish.xyz/api.php?q=")
 (def fallback-search-engine "https://searx.tuxcloud.net/search?q=")
 
