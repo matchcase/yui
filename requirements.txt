@@ -1,0 +1,15 @@
+discord.py
+langchain
+langchain-core
+langchain-google-genai
+langchain-openai
+langchain-anthropic
+langchain-ollama
+langchain-community
+langgraph
+chromadb
+python-dotenv
+requests
+InquirerPy
+rich
+dateparser
