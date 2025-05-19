@@ -80,7 +80,7 @@ def get_embedding_model():
         from langchain_openai import OpenAIEmbeddings
         # Use OpenAI's embeddings if we have an API key
         return OpenAIEmbeddings(openai_api_key=config.OPENAI_API_KEY)
-    elif provider == "google" and config.GEMINI_API_KEY:
+    elif provider == "gemini" and config.GEMINI_API_KEY:
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
         # Use Google's embeddings if we have an API key
         return GoogleGenerativeAIEmbeddings(

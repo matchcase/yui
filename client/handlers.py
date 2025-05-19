@@ -41,7 +41,7 @@ def setup_handlers(bot: commands.Bot):
         is_dm = isinstance(message.channel, discord.DMChannel)
         is_mentioned = bot.user in message.mentions
         # "Yui" is the trigger word, but we also want to respond to "Yui!", "Yui," and lowercase strs
-        message_content_word_set = set(re.sub(r"[^a-zA-Z]", "", message.content).lower().split())
+        message_content_word_set = set(re.sub(r"[^a-zA-Z] ", " ", message.content).lower().split())
         contains_trigger_keyword = "yui" in message_content_word_set
 
         if is_dm or is_mentioned or contains_trigger_keyword:
