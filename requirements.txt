@@ -5,6 +5,7 @@ langchain-google-genai
 langchain-openai
 langchain-anthropic
 langchain-ollama
+langchain-huggingface
 langchain-community
 langgraph
 chromadb
@@ -13,3 +14,5 @@ requests
 InquirerPy
 rich
 dateparser
+html2text
+playwright
