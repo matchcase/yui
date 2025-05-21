@@ -1,7 +1,11 @@
 # Yui
-A feature-rich, LangGraph-based Agentic Discord bot with long-term memory!
+A feature-rich, LangGraph-based Multimodal Agentic Discord bot with long-term memory!
+
+![Example usage of the bot](example.png)
+
 ## Features
 - 🧠 Long-term conversation memory using ChromaDB
+- 📷 Supports multimodal media like images
 - 🤖 Supports Google, OpenAI, Anthropic and even local models
 - 🌐 (Tool) Can search the web and crawl webpages
 - 🔔 (Tool) Can set reminders for users and ping them

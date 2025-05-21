@@ -42,8 +42,8 @@ async def add_to_memory(
                 "channel_id": channel_id,
                 "timestamp": str(int(asyncio.get_event_loop().time()))
             }]
-        if attachments:
-            metadata[0]["attachments"] = attachments
+        if attachments: # we cannot add a list to memory
+            metadata[0]["attachments"] = ", ".join(attachments)
         memory_collection.add(
             ids=[memory_id],
             embeddings=[embedding],
