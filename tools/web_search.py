@@ -23,6 +23,9 @@ class WebSearchArgs(BaseModel):
 )
 
 async def web_search(query: str, limit: int = 5) -> Dict[str, Any]:
+    # Gemini sometimes passes a float instead of an int
+    if type(limit) is not int:
+        limit = int(limit)
     search = SearxSearchWrapper(searx_host="http://localhost:8888")
     results = search.results(query, num_results=limit)
     return results

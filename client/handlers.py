@@ -41,7 +41,7 @@ def setup_handlers(bot: commands.Bot):
         is_dm = isinstance(message.channel, discord.DMChannel)
         is_mentioned = bot.user in message.mentions
         # "Yui" is the trigger word, but we also want to respond to "Yui!", "Yui," and lowercase strs
-        message_content_word_set = set(re.sub(r"[^a-zA-Z] ", " ", message.content).lower().split())
+        message_content_word_set = set(re.sub(r"[^a-zA-Z ]", " ", message.content).lower().split())
         contains_trigger_keyword = "yui" in message_content_word_set
 
         if is_dm or is_mentioned or contains_trigger_keyword:
@@ -51,6 +51,18 @@ def setup_handlers(bot: commands.Bot):
                 try:
                     user_id = str(message.author.id)
                     channel_id = str(message.channel.id)
+                    image_urls = [
+                        attachment.url for attachment in message.attachments
+                        if attachment.content_type and attachment.content_type.startswith("image/")
+                    ]
+                    if message.reference and isinstance(message.reference.resolved, discord.Message):
+                        ref = message.reference.resolved
+                        if ref.content:
+                            content_for_agent = f"(In reference to:\n{ref.content})\n\n{content_for_agent}"
+                        image_urls += [
+                            attachment.url for attachment in ref.attachments
+                            if attachment.content_type and attachment.content_type.startswith("image/")
+                        ]
                     conv_key = f"{channel_id}:{user_id}"
                     if conv_key not in active_conversations:
                         logger.info(f"Creating new agent graph for conversation: {conv_key}")
@@ -61,6 +73,7 @@ def setup_handlers(bot: commands.Bot):
                         user_message_content=content_for_agent,
                         user_id=user_id,
                         channel_id=channel_id,
+                        attachments=image_urls,
                     )
                     if response_text:
                         await message.reply(response_text)

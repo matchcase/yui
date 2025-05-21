@@ -53,6 +53,7 @@ class ProgramConfig():
                     self.OLLAMA_MODEL = inquirer.text(message="Enter the name of the model").execute()
         
         self.DEFAULT_LLM_PROVIDER = "gemini" if self.GEMINI_API_KEY else "openai" if self.OPENAI_API_KEY else "anthropic" if self.ANTHROPIC_API_KEY else "ollama"
+        self.TOKEN_THRESHOLD = {"gemini": 500000, "openai": 64000, "anthropic": 100000, "ollama": 16000}.get(self.DEFAULT_LLM_PROVIDER, 16000)
         self.config_dict_new = {
             "DISCORD_TOKEN": self.DISCORD_TOKEN,
             "GEMINI_API_KEY": self.GEMINI_API_KEY,
@@ -65,6 +66,7 @@ class ProgramConfig():
             "OLLAMA_MODEL": self.OLLAMA_MODEL,
             "DEVELOPER_USER_ID": self.DEVELOPER_USER_ID,
             "DEFAULT_LLM_PROVIDER": self.DEFAULT_LLM_PROVIDER,
+            "TOKEN_THRESHOLD": self.TOKEN_THRESHOLD,
         }
         
         if self.config_dict != self.config_dict_new:

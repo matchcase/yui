@@ -22,8 +22,9 @@ python3 main.py
 You will be prompted to provide values for your Discord token, provider API token (or Ollama model name) and user ID.
 Your bot should be up and running now!
 ## Planned features
+- [X] Multimodal model integration
+- [X] Context window and idling-based memory management
 - [ ] Slash commands for tools
-- [ ] Multimodal model integration
 - [ ] Tool for creating polls
 - [ ] Tool for captioning images
 - [ ] Tool for searching GIFs

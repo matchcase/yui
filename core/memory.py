@@ -1,4 +1,5 @@
 import chromadb
+from chromadb.config import Settings as ChromadbSettings
 import logging
 import asyncio
 from typing import List, Dict
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 MEMORY_VECTOR_DB_PATH = "data/memory_store"
 MEMORY_TOP_K = 5
 
-client = chromadb.PersistentClient(path=MEMORY_VECTOR_DB_PATH)
+client = chromadb.PersistentClient(path=MEMORY_VECTOR_DB_PATH, settings=ChromadbSettings(anonymized_telemetry=False))
 
 # Setup
 try:
@@ -22,22 +23,31 @@ except Exception as e:
     logger.error(f"Error initializing memory database: {e}", exc_info=True)
     raise
 
-async def add_to_memory(user_id: str, channel_id: str, user_message: str, bot_response: str) -> None:
+async def add_to_memory(
+        user_id: str,
+        channel_id: str,
+        user_message: str,
+        bot_response: str,
+        attachments: List[str] = [],
+) -> None:
     """Add a conversation exchange to memory."""
     try:
         memory_id = str(uuid.uuid4())
-        from .models import get_embedding_model
+        from core.models import get_embedding_model
         embedding_model = get_embedding_model()
         combined_text = f"User: {user_message}\nAssistant: {bot_response}"
         embedding = await embedding_model.aembed_query(combined_text)
-        memory_collection.add(
-            ids=[memory_id],
-            embeddings=[embedding],
-            metadatas=[{
+        metadata = [{
                 "user_id": user_id,
                 "channel_id": channel_id,
                 "timestamp": str(int(asyncio.get_event_loop().time()))
-            }],
+            }]
+        if attachments:
+            metadata[0]["attachments"] = attachments
+        memory_collection.add(
+            ids=[memory_id],
+            embeddings=[embedding],
+            metadatas=metadata,
             documents=[combined_text]
         )
         logger.info(f"Added memory {memory_id} for user {user_id}")
